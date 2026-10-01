@@ -165,7 +165,7 @@ ol.chart { list-style: none; margin: 24px 0 0; padding: 0; }
     <p class="lede">上傳從 Spotify 下載的 JSON 串流紀錄檔，支援一次選取多個檔案合併計算。</p>
     <div class="strip" id="strip" aria-hidden="true"></div>
     <div class="actions">
-      <button class="primary" id="pick" type="button">選擇 StreamingHistory.json</button>
+      <button class="primary" id="pick" type="button">選擇 Spotify 播放紀錄 JSON</button>
       <button class="linkbtn" id="demo" type="button">先用範例資料看看</button>
     </div>
     <p class="hint">檔案僅在您的瀏覽器端進行運算，絕對不會上傳到任何伺服器。</p>
@@ -177,7 +177,7 @@ ol.chart { list-style: none; margin: 24px 0 0; padding: 0; }
         <li>在左側選單找到並點擊「隱私權設定」。</li>
         <li>捲動到最下方找到「下載您的資料」區塊。</li>
         <li>勾選「帳戶資料」（預設需準備數天），點選「要求資料」。</li>
-        <li>收到 Spotify 通知信後下載解壓縮，找出名稱包含 <code>StreamingHistory</code> 的 JSON 檔案上傳（可一次全選上傳）。</li>
+        <li>收到 Spotify 通知信後下載解壓縮，找出名稱包含 <code>StreamingHistory</code> 或 <code>Streaming_History_Audio</code> 的 JSON 檔案上傳（可一次全選上傳）。</li>
       </ol>
     </details>
   </section>
@@ -322,40 +322,35 @@ ol.chart { list-style: none; margin: 24px 0 0; padding: 0; }
     render();
   }
 
-  function handleFiles(files) {
-    if (!files || files.length === 0) return;
+  function handleFiles(fileList) {
+    // 先複製成陣列：input 清空或 drop 結束後，原本的 FileList 會被瀏覽器清空
+    var files = Array.prototype.slice.call(fileList || []);
+    if (!files.length) return;
     showError('');
-    var allEntries = [];
-    var readCount = 0;
+    var all = [];
+    var done = 0;
+    var bad = 0;
 
-    for (var i = 0; i < files.length; i++) {
-      (function(file) {
-        var reader = new FileReader();
-        reader.onload = function(e) {
-          try {
-            var data = JSON.parse(e.target.result);
-            if (Array.isArray(data)) {
-              allEntries = allEntries.concat(parseHistory(data));
-            }
-          } catch(err) {
-            console.error("無法解析檔案:", file.name);
-          }
-          readCount++;
-          if (readCount === files.length) {
-            if (allEntries.length === 0) {
-              showError('檔案內找不到有效的 Spotify 播放紀錄，或播放時間皆短於 30 秒。');
-            } else {
-              loadEntries(allEntries);
-            }
-          }
-        };
-        reader.onerror = function() {
-          readCount++;
-          if (readCount === files.length && allEntries.length > 0) loadEntries(allEntries);
-        };
-        reader.readAsText(file);
-      })(files[i]);
+    function finalize() {
+      if (all.length) { loadEntries(all); return; }
+      showError(bad
+        ? '無法讀取這個檔案。請選擇 Spotify 匯出的 JSON（例如 Streaming_History_Audio_2021.json）。'
+        : '檔案內找不到有效的 Spotify 播放紀錄，或播放時間皆短於 30 秒。');
     }
+
+    files.forEach(function (file) {
+      var reader = new FileReader();
+      function finish() { done++; if (done === files.length) finalize(); }
+      reader.onload = function (e) {
+        try {
+          var data = JSON.parse(e.target.result);
+          if (Array.isArray(data)) all = all.concat(parseHistory(data)); else bad++;
+        } catch (err) { bad++; }
+        finish();
+      };
+      reader.onerror = function () { bad++; finish(); };
+      reader.readAsText(file);
+    });
   }
 
   function buildRangeOptions() {
