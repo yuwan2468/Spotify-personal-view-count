@@ -152,6 +152,19 @@ ol.chart { list-style: none; margin: 24px 0 0; padding: 0; }
   .count { font-size: 1.2rem; }
   .tabs { gap: 24px; }
 }
+
+/* share image */
+.share { margin: 0 0 56px; }
+.share summary { cursor: pointer; font-weight: 500; }
+.share-body { margin-top: 24px; }
+.share-body .note { color: var(--muted); font-size: .92rem; margin: 0 0 24px; }
+.radios { display: flex; flex-direction: column; gap: 16px; margin-bottom: 32px; }
+.radios label { display: flex; align-items: center; gap: 12px; cursor: pointer; }
+.radios input { accent-color: var(--accent); width: 18px; height: 18px; margin: 0; }
+.share-out { margin-top: 36px; }
+.share-out img { display: block; width: 100%; max-width: 420px; height: auto; border-radius: 12px; border: 1px solid var(--line); margin-bottom: 28px; }
+.share-msg { color: var(--danger); margin: 20px 0 0; }
+button:disabled { opacity: .6; cursor: default; }
 </style>
 </head>
 <body>
@@ -188,6 +201,25 @@ ol.chart { list-style: none; margin: 24px 0 0; padding: 0; }
       <button class="linkbtn" id="swap" type="button">重新上傳</button>
     </div>
     <p class="summary" id="summary"></p>
+
+    <details class="share" id="share">
+      <summary>產生分享圖片</summary>
+      <div class="share-body">
+        <p class="note">依目前選擇的時間範圍產生，按下「產生圖片」才會開始製作。</p>
+        <div class="radios" role="radiogroup" aria-label="圖片內容">
+          <label><input type="radio" name="shareMode" value="artists50"> 歌手前 50 名</label>
+          <label><input type="radio" name="shareMode" value="songs50"> 歌曲前 50 名</label>
+          <label><input type="radio" name="shareMode" value="both20" checked> 歌手與歌曲各前 20 名</label>
+        </div>
+        <button class="primary" id="genBtn" type="button">產生圖片</button>
+        <p class="share-msg" id="shareMsg" role="alert" hidden></p>
+        <div class="share-out" id="shareOut" hidden>
+          <img id="sharePreview" alt="排行榜圖片預覽">
+          <button class="primary" id="dlBtn" type="button">下載圖片</button>
+          <p class="hint">下載沒反應時，可長按（或按右鍵）圖片另存。</p>
+        </div>
+      </div>
+    </details>
 
     <div id="hero"></div>
 
@@ -316,6 +348,7 @@ ol.chart { list-style: none; margin: 24px 0 0; padding: 0; }
     $('q').value = '';
     state.limit = 50;
     buildRangeOptions();
+    resetShare();
     document.body.classList.add('loaded');
     window.scrollTo(0, 0);
     showError('');
@@ -383,12 +416,12 @@ ol.chart { list-style: none; margin: 24px 0 0; padding: 0; }
     return list;
   }
 
-  function compute() {
+  function compute(tabOv) {
     var list = inRange(state.entries);
     var map = new Map();
     var songSet = new Set(), artistSet = new Set();
     var minT = Infinity, maxT = 0;
-    var asArtist = state.tab === 'artists';
+    var asArtist = (tabOv || state.tab) === 'artists';
     list.forEach(function (e) {
       var sKey = (e.title + '\u0000' + e.artist).toLowerCase();
       songSet.add(sKey);
@@ -564,6 +597,220 @@ ol.chart { list-style: none; margin: 24px 0 0; padding: 0; }
       strip.appendChild(d);
     }
   })();
+
+  // ---- 分享圖片（只在按下「產生圖片」時才會繪製）----
+  var shareBlob = null, shareUrl = null, shareName = '';
+
+  function shareMsg(t) { var m = $('shareMsg'); m.textContent = t || ''; m.hidden = !t; }
+  function resetShare() {
+    if (shareUrl) { URL.revokeObjectURL(shareUrl); shareUrl = null; }
+    shareBlob = null;
+    var out = $('shareOut');
+    if (out) out.hidden = true;
+    shareMsg('');
+  }
+  function cssv(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+
+  function roundRectPath(ctx, x, y, w, h, r) {
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+  function drawArtCanvas(ctx, x, y, size, pal, pat) {
+    function circ(cx, cy, r, c) { ctx.fillStyle = c; ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill(); }
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(size / 100, size / 100);
+    ctx.beginPath(); roundRectPath(ctx, 0, 0, 100, 100, 20); ctx.clip();
+    ctx.fillStyle = pal.bg; ctx.fillRect(0, 0, 100, 100);
+    switch (pat) {
+      case 0:
+        circ(50, 52, 32, pal.fg); circ(78, 24, 10, pal.ac); break;
+      case 1:
+        ctx.fillStyle = pal.fg; ctx.fillRect(0, 0, 50, 100); circ(50, 50, 22, pal.ac); break;
+      case 2:
+        ctx.fillStyle = pal.fg;
+        [10, 30, 50, 70].forEach(function (yy) { ctx.fillRect(0, yy, 100, 12); });
+        circ(70, 50, 17, pal.ac); break;
+      case 3:
+        ctx.fillStyle = pal.fg; ctx.beginPath();
+        ctx.moveTo(0, 100); ctx.lineTo(0, 20); ctx.arc(0, 100, 80, -Math.PI / 2, 0, false); ctx.closePath(); ctx.fill();
+        circ(72, 28, 12, pal.ac); break;
+      case 4:
+        [25, 50, 75].forEach(function (xx) {
+          [25, 50, 75].forEach(function (yy) {
+            var mid = xx === 50 && yy === 50;
+            circ(xx, yy, mid ? 12 : 8, mid ? pal.ac : pal.fg);
+          });
+        });
+        break;
+      default:
+        ctx.fillStyle = pal.fg; ctx.beginPath();
+        ctx.moveTo(50, 12); ctx.lineTo(90, 84); ctx.lineTo(10, 84); ctx.closePath(); ctx.fill();
+        circ(50, 64, 12, pal.ac);
+    }
+    ctx.restore();
+  }
+  function fitText(ctx, text, maxW) {
+    if (ctx.measureText(text).width <= maxW) return text;
+    var arr = Array.from(text);
+    while (arr.length > 1 && ctx.measureText(arr.join('') + '…').width > maxW) arr.pop();
+    return arr.join('') + '…';
+  }
+
+  async function renderShare(mode) {
+    var specs;
+    if (mode === 'both20') specs = [{ tab: 'artists', n: 20, label: '歌手前 20 名' }, { tab: 'songs', n: 20, label: '歌曲前 20 名' }];
+    else if (mode === 'artists50') specs = [{ tab: 'artists', n: 50, label: '歌手前 50 名' }];
+    else specs = [{ tab: 'songs', n: 50, label: '歌曲前 50 名' }];
+
+    var data = specs.map(function (sp) {
+      var c = compute(sp.tab);
+      return { c: c, rows: c.rows.slice(0, sp.n) };
+    });
+    var total = data[0].c.total;
+    if (!total) throw new Error('empty');
+
+    var cols;
+    if (specs.length === 2) {
+      cols = specs.map(function (sp, i) { return { label: sp.label, rows: data[i].rows }; });
+    } else {
+      cols = [
+        { label: specs[0].label, rows: data[0].rows.slice(0, 25) },
+        { label: '', rows: data[0].rows.slice(25, 50) }
+      ];
+    }
+
+    var W = 1080, PAD = 64, GAP = 48, S = 2, ROW = 80, TOP = 300;
+    var colW = (W - PAD * 2 - GAP) / 2;
+    var N = Math.max.apply(null, cols.map(function (c) { return c.rows.length; }));
+    var H = TOP + N * ROW + 110;
+    var title = document.querySelector('.topbar h2').textContent;
+    var rangeLabel = $('range').options[$('range').selectedIndex].textContent;
+    var sub = rangeLabel + '，共播放 ' + fmt(total) + ' 次';
+    var foot = '產生於 ' + new Date().toLocaleDateString('zh-TW');
+
+    var sample = [title, sub, foot, '次0123456789'];
+    cols.forEach(function (c) { c.rows.forEach(function (r) { sample.push(r.title, r.sub); }); });
+    sample = sample.join('');
+    try {
+      await Promise.race([
+        Promise.all([
+          document.fonts.load('900 56px "Noto Serif TC"', sample),
+          document.fonts.load('700 34px "Noto Serif TC"', sample),
+          document.fonts.load('700 22px "Noto Sans TC"', sample),
+          document.fonts.load('400 18px "Noto Sans TC"', sample)
+        ]),
+        new Promise(function (r) { setTimeout(r, 5000); })
+      ]);
+    } catch (e) { /* 字型載入失敗時改用備用字型 */ }
+
+    var cv = document.createElement('canvas');
+    cv.width = W * S; cv.height = H * S;
+    var ctx = cv.getContext('2d');
+    ctx.scale(S, S);
+
+    var bg = cssv('--bg'), ink = cssv('--ink'), muted = cssv('--muted'), line = cssv('--line'), accent = cssv('--accent');
+    var SERIF = '"Noto Serif TC", "Songti TC", "PMingLiU", serif';
+    var SANS = '"Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif';
+
+    ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+    ctx.textBaseline = 'alphabetic';
+    ctx.textAlign = 'left';
+    ctx.fillStyle = ink; ctx.font = '900 56px ' + SERIF;
+    ctx.fillText(fitText(ctx, title, W - PAD * 2), PAD, 132);
+    ctx.fillStyle = muted; ctx.font = '400 26px ' + SANS;
+    ctx.fillText(fitText(ctx, sub, W - PAD * 2), PAD, 188);
+
+    cols.forEach(function (col, ci) {
+      var cx = PAD + ci * (colW + GAP), right = cx + colW;
+      if (col.label) {
+        ctx.textAlign = 'left';
+        ctx.fillStyle = ink; ctx.font = '700 34px ' + SERIF;
+        ctx.fillText(col.label, cx, 268);
+      }
+      col.rows.forEach(function (r, i) {
+        var y = TOP + i * ROW;
+        ctx.fillStyle = line; ctx.fillRect(cx, y + ROW - 1, colW, 1);
+
+        ctx.textAlign = 'right';
+        ctx.font = '700 22px ' + SERIF;
+        ctx.fillStyle = r.rank <= 3 ? accent : muted;
+        ctx.fillText(String(r.rank), cx + 34, y + 48);
+
+        drawArtCanvas(ctx, cx + 48, y + 12, 56, palOf(r.ck), patOf(r.ck));
+
+        ctx.font = '400 18px ' + SANS; ctx.fillStyle = muted;
+        ctx.fillText('次', right, y + 48);
+        var uw = ctx.measureText('次').width;
+        var cs = fmt(r.n);
+        ctx.font = '700 26px ' + SERIF; ctx.fillStyle = ink;
+        ctx.fillText(cs, right - uw - 4, y + 48);
+        var cw = ctx.measureText(cs).width + uw + 4;
+
+        ctx.textAlign = 'left';
+        var tx = cx + 48 + 56 + 16, maxW = right - cw - 16 - tx;
+        ctx.font = '700 22px ' + SANS; ctx.fillStyle = ink;
+        ctx.fillText(fitText(ctx, r.title, maxW), tx, y + 37);
+        ctx.font = '400 18px ' + SANS; ctx.fillStyle = muted;
+        ctx.fillText(fitText(ctx, r.sub, maxW), tx, y + 61);
+      });
+    });
+
+    ctx.textAlign = 'left'; ctx.fillStyle = muted; ctx.font = '400 20px ' + SANS;
+    ctx.fillText(foot, PAD, H - 52);
+
+    return new Promise(function (resolve, reject) {
+      cv.toBlob(function (b) { b ? resolve(b) : reject(new Error('toBlob')); }, 'image/png');
+    });
+  }
+
+  async function generateShare() {
+    var checked = document.querySelector('input[name="shareMode"]:checked');
+    var mode = checked ? checked.value : 'both20';
+    var btn = $('genBtn');
+    btn.disabled = true; btn.textContent = '產生中…';
+    resetShare();
+    try {
+      var blob = await renderShare(mode);
+      var prefix = document.title.indexOf('Spotify') !== -1 ? 'spotify' : 'ytmusic';
+      shareBlob = blob;
+      shareName = prefix + '-ranking-' + mode + '.png';
+      shareUrl = URL.createObjectURL(blob);
+      $('sharePreview').src = shareUrl;
+      $('shareOut').hidden = false;
+      $('shareOut').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    } catch (err) {
+      shareMsg('產生圖片失敗，請再試一次。');
+    } finally {
+      btn.disabled = false; btn.textContent = '產生圖片';
+    }
+  }
+
+  async function downloadShare() {
+    if (!shareBlob) return;
+    var dl = null;
+    try { dl = (window.claude && window.claude.use) ? await window.claude.use('downloads') : null; } catch (e) { dl = null; }
+    if (dl) {
+      try {
+        await dl.save({ filename: shareName, data: shareBlob });
+      } catch (err) {
+        if (!err || err.code !== 'declined') shareMsg('無法儲存，請長按（或按右鍵）圖片另存。');
+      }
+      return;
+    }
+    var a = document.createElement('a');
+    a.href = shareUrl; a.download = shareName;
+    document.body.appendChild(a); a.click(); a.remove();
+  }
+
+  $('genBtn').addEventListener('click', generateShare);
+  $('dlBtn').addEventListener('click', downloadShare);
+  document.querySelectorAll('input[name="shareMode"]').forEach(function (r) { r.addEventListener('change', resetShare); });
+  $('range').addEventListener('change', resetShare);
 
   // events
   $('pick').addEventListener('click', function () { $('file').click(); });
